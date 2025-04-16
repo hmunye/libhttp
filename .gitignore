@@ -3,3 +3,6 @@ httpc
 build/
 *.o
 *.d
+
+# misc
+messages.txt
