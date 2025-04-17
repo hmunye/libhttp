@@ -4,5 +4,9 @@ build/
 *.o
 *.d
 
+# test
+test_runner
+test/build/
+
 # misc
 messages.txt
