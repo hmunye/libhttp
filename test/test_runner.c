@@ -7,9 +7,9 @@ int main(void) {
     printf("+-------------------+\n");
     test_channel_all();
 
-    printf("+------------------------+\n");
-    printf("|   REQUEST LINE TESTS   |\n");
-    printf("+------------------------+\n");
+    printf("+--------------------------------+\n");
+    printf("|   REQUEST LINE PARSING TESTS   |\n");
+    printf("+--------------------------------+\n");
     test_request_line_all();
 
     return 0;

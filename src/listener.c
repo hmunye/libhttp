@@ -19,9 +19,9 @@ static void listen_tcp(const char *restrict host, const char *restrict port,
     struct addrinfo hints, *serverinfo, *curr_node;
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;      // Either IPv4 or IPv6
-    hints.ai_socktype = SOCK_STREAM;  // TCP socket
-    hints.ai_flags = AI_PASSIVE;      // Uses wildcard address if host is NULL
+    hints.ai_family = AF_UNSPEC;     /* Either IPv4 or IPv6. */
+    hints.ai_socktype = SOCK_STREAM; /* TCP socket. */
+    hints.ai_flags = AI_PASSIVE; /* Uses wildcard address if host is NULL. */
 
     if ((status = getaddrinfo(host, port, &hints, &serverinfo)) != 0) {
         fprintf(stderr, "ERROR: getaddrinfo: %s\n", gai_strerror(status));
@@ -29,7 +29,7 @@ static void listen_tcp(const char *restrict host, const char *restrict port,
     }
 
     // Iterate through the linked list of addrinfo structs and try to bind to
-    // the first working socket
+    // the first working socket.
     for (curr_node = serverinfo; curr_node != NULL;
          curr_node = curr_node->ai_next) {
         if ((tcp_sock_fd = socket(curr_node->ai_family, curr_node->ai_socktype,
@@ -39,7 +39,7 @@ static void listen_tcp(const char *restrict host, const char *restrict port,
         }
 
         // Enable SO_REUSEADDR to allow the socket address to be reused after a
-        // restart
+        // restart.
         if (setsockopt(tcp_sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
                        sizeof reuse) == -1) {
             perror("ERROR: setsockopt");
@@ -57,7 +57,7 @@ static void listen_tcp(const char *restrict host, const char *restrict port,
 
     freeaddrinfo(serverinfo);
 
-    // Reached end of addrinfo list without finding a valid socket
+    // Reached end of addrinfo list without finding a valid socket.
     if (!curr_node) {
         fprintf(stderr, "ERROR: server: failed to bind to socket.\n");
         exit(1);
@@ -76,7 +76,7 @@ static int accept_tcp(connection_t *conn) {
     assert(conn);
 
     // Large enough to hold either IPv4 (sockaddr_in) or IPv6 (sockaddr_in6)
-    // address information
+    // address information.
     struct sockaddr_storage client_addr;
     socklen_t sin_size = sizeof client_addr;
 
@@ -88,14 +88,14 @@ static int accept_tcp(connection_t *conn) {
     }
 
     switch (client_addr.ss_family) {
-        case AF_INET:  // IPv4
+        case AF_INET: /* IPv4 */
             inet_ntop(AF_INET,
                       &(((struct sockaddr_in *)(struct sockaddr *)&client_addr)
                             ->sin_addr),
                       conn->remote_addr,
                       sizeof conn->remote_addr / sizeof *conn->remote_addr);
             break;
-        case AF_INET6:  // IPv6
+        case AF_INET6: /* IPv6 */
             inet_ntop(AF_INET6,
                       &(((struct sockaddr_in6 *)(struct sockaddr *)&client_addr)
                             ->sin6_addr),
@@ -109,7 +109,7 @@ static int accept_tcp(connection_t *conn) {
     return 0;
 }
 
-// Close the listening socket if it's open.
+// Close the server socket if open.
 static void close_tcp(void) {
     if (tcp_sock_fd != -1) {
         close(tcp_sock_fd);

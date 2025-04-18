@@ -1,7 +1,7 @@
 #ifndef LISTENER_H
 #define LISTENER_H
 
-// Exposes POSIX definitions like getaddrinfo(), struct addrinfo, etc.
+/* Exposes POSIX definitions like getaddrinfo(), struct addrinfo, etc. */
 #if defined(__unix__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200112L
 #endif

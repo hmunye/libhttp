@@ -6,6 +6,7 @@
 
 #include "channel.h"
 #include "listener.h"
+#include "request.h"
 
 // ENCODE_INT(n): int -> intptr_t -> void *
 #define ENCODE_INT(n) ((void *)(intptr_t)(n))
@@ -14,55 +15,50 @@
 
 #define HOST "127.0.0.1"
 #define PORT "8080"
-// Maximum number of pending connections in the queue
-#define BACKLOG 16
+#define BACKLOG 16 /* Maximum number of pending connections in the queue. */
 
-// Timeout in milliseconds
+// Timeout in milliseconds.
 #define POLLING_TIMEOUT 5
 
 #define BUFFER_SIZE 8
-#define LINE_SIZE 1024
 
 #define THREAD_POOL 8
 #define CHANNEL_SIZE 16
 channel_t *chan;
 
-// consumer: reads client connections from channel and writes lines to stdout
+// TODO: replace polling since it is only on one socket at a time
+// consumer: reads client connections from channel and writes lines to stdout.
 static void *producer(void *arg) {
     (void)arg;
 
     while (1) {
         int clientfd = DECODE_INT(channel_read(chan));
 
+        request_t req = {0};
         char buf[BUFFER_SIZE + 1];
-        char line[LINE_SIZE + 1];
 
         struct pollfd pfd[1];
 
         pfd[0].fd = clientfd;
         pfd[0].events = POLLIN;
 
-        int events;
+        int status, events;
         ssize_t bytes_read;
-        size_t line_idx = 0;
         while (1) {
-            // Poll client socket for reading to avoid blocking on recv()
+            // Poll client socket for reading to avoid blocking on recv().
             events = poll(pfd, 1, POLLING_TIMEOUT);
             if (events == -1) {
                 break;
             }
 
-            // Timeout expired
+            // Timeout expired.
             if (events == 0) {
+                while ((status = request_parse(&req, "", 0)) ==
+                       PARSE_INCOMPLETE);
                 break;
             }
 
-            // TODO: handle event errors
-            if (pfd[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-                break;
-            }
-
-            // Check if POLLIN is set and data is ready to read
+            // Check if POLLIN is set and data is ready to read.
             if (pfd[0].revents & POLLIN) {
                 bytes_read = recv(clientfd, buf, (sizeof buf) - 1, 0);
                 if (bytes_read <= 0) {
@@ -70,51 +66,62 @@ static void *producer(void *arg) {
                 }
 
                 buf[bytes_read] = '\0';
-                for (ssize_t i = 0; i < bytes_read; ++i) {
-                    if (buf[i] == '\n') {
-                        line[line_idx] = '\0';
-                        printf("%s\n", line);
-                        line_idx = 0;
-                    } else {
-                        if (line_idx < LINE_SIZE) {
-                            line[line_idx++] = buf[i];
-                        }
-                    }
+                if ((status = request_parse(&req, buf, (size_t)bytes_read)) !=
+                    PARSE_INCOMPLETE) {
+                    break;
                 }
             }
         }
 
         if (events == -1) {
             perror("ERROR: poll");
+
+            printf("server: client connection closed\n");
             close(clientfd);
             continue;
         }
 
         if (bytes_read == -1) {
             perror("ERROR: recv");
+
+            printf("server: client connection closed\n");
             close(clientfd);
             continue;
         }
 
-        // Timeout expired or remote side has closed the connection
-        if (events == 0 || bytes_read == 0) {
-            if (line_idx > 0) {
-                line[line_idx] = '\0';
-                printf("%s\n", line);
-                line_idx = 0;
-            }
+        switch (status) {
+            case PARSE_OK:
+                printf("Request Line: \n");
+                printf("- Method: %s\n",
+                       method_to_str[req.request_line.method]);
+                printf("- Target: %s\n", req.request_line.request_target);
+                printf("- Version: %s\n", req.request_line.version);
 
-            printf("server: client connection closed\n");
-            close(clientfd);
+                printf("server: client connection closed\n");
+                close(clientfd);
+                continue;
+            case PARSE_ERR:
+                printf("server: server error occured\n");
+
+                printf("server: client connection closed\n");
+                close(clientfd);
+                continue;
+            case PARSE_INCOMPLETE:
+            case PARSE_INVALID:
+                printf("server: error occured parsing HTTP request\n");
+
+                printf("server: client connection closed\n");
+                close(clientfd);
+                continue;
         }
     }
 
     return NULL;
 }
 
-// producer: accepts incoming connections and writes connections to channel
+// producer: accepts incoming connections and writes connections to channel.
 int main(void) {
-    // Disable buffering for stdout (line-buffered by default)
+    // Disable buffering for stdout (line-buffered by default).
     setbuf(stdout, NULL);
 
     listener_t *listener = &tcp_listener;

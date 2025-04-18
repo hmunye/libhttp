@@ -21,10 +21,21 @@ void channel_free(channel_t *chan, channel_cleanup_fn cleanup_fn);
  * space becomes available. */
 void channel_write(channel_t *chan, void *data);
 
+/* Writes the given data to the channel. Returns (1) if the channel is full, (0)
+ * if write was successful. */
+// int channel_try_write(channel_t *chan, void *data);
+
 /* Reads and returns the next element from the channel. Blocks if the channel is
- * empty until data becomes available. Callers should be aware that elements may
+ * empty until data becomes available. Caller should be aware that elements may
  * be overwritten in the channel, so returned pointers must be managed properly.
  */
 void *channel_read(channel_t *chan);
+
+/* Reads the next element from the channel. Caller should be aware that
+ * elements may be overwritten in the channel, so returned pointers must be
+ * managed properly. Returns the read element on success, otherwise NULL if the
+ * channel is empty.
+ */
+// void *channel_try_read(channel_t *chan);
 
 #endif  // CHANNEL_H
