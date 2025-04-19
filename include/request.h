@@ -25,12 +25,11 @@
 #define REQUEST_TARGET_SIZE 1025
 #define VERSION_SIZE 9 /* Only supporting HTTP/1.1 version. */
 
-#define HEADER_FIELD_NAME_SIZE 128
-#define HEADER_FIELD_VALUE_SIZE 1024
+#define HEADER_FIELD_NAME_SIZE 64
+#define HEADER_FIELD_VALUE_SIZE 512
 #define HEADERS_MAX_LIMIT 32
 
-/* Extra space for space characters (SP) and (CRLF). */
-#define REQUEST_LINE_SIZE (METHOD_SIZE + REQUEST_TARGET_SIZE + VERSION_SIZE + 4)
+#define BODY_SIZE 2048
 
 typedef enum {
     GET,
@@ -54,6 +53,8 @@ typedef struct {
 typedef struct {
     request_line_t request_line;
     hash_table_t *headers;
+    char body[BODY_SIZE];
+    size_t body_len;
 } request_t;
 
 /* Parses HTTP request chunks incrementally into the given `req`. Returns

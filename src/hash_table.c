@@ -69,20 +69,27 @@ static int hash_table_resize(hash_table_t *ht) {
     return 1;
 }
 
-int hash_table_init(hash_table_t *ht, uint32_t capacity, ht_hash_fn hash_fn) {
-    assert(ht && ((capacity & (capacity - 1)) == 0));
+hash_table_t *hash_table_init(uint32_t capacity, ht_hash_fn hash_fn) {
+    assert((capacity & (capacity - 1)) == 0);
+
+    hash_table_t *ht = malloc(sizeof(*ht));
+    if (!ht) {
+        perror("ERROR: hash_table_init (malloc)");
+        return NULL;
+    }
 
     ht->entries = calloc(capacity, sizeof(*ht->entries));
     if (!ht->entries) {
         perror("ERROR: hash_table_init (calloc)");
-        return 0;
+        free(ht);
+        return NULL;
     }
 
     ht->hash_fn = hash_fn ? hash_fn : fnv_1a_hash;
     ht->capacity = capacity;
     ht->size = 0;
 
-    return 1;
+    return ht;
 }
 
 void hash_table_free(hash_table_t *ht) {
@@ -98,6 +105,8 @@ void hash_table_free(hash_table_t *ht) {
 
         free(ht->entries);
     }
+
+    free(ht);
 }
 
 int hash_table_insert(hash_table_t *ht, const char *key, const char *value) {
@@ -143,7 +152,7 @@ int hash_table_insert(hash_table_t *ht, const char *key, const char *value) {
     for (size_t i = 1; i < ht->capacity && ht->entries[idx].key; ++i) {
         // Duplicate key found - update the value of the key, appending values
         // in comma separated list.
-        if (strcmp(ht->entries[idx].key, key) == 0) {
+        if (strcmp(ht->entries[idx].key, alloc_key) == 0) {
             char *new_value = kv.value;
             char *prev_value = ht->entries[idx].value;
 
@@ -312,4 +321,25 @@ int hash_table_delete(hash_table_t *ht, const char *key) {
     }
 
     return 0;
+}
+
+void hash_table_debug_print(const hash_table_t *ht) {
+    assert(ht);
+
+    for (size_t i = 0; i < ht->capacity; ++i) {
+        key_val_t entry = ht->entries[i];
+#ifdef _DEBUG
+        if (entry.key && !entry.is_deleted) {
+            printf("[%zu]\t\"%s\" : \"%s\"\n", i, entry.key, entry.value);
+        } else if (!entry.key && !entry.is_deleted) {
+            printf("[%zu]\t\"(null)\" : \"(null)\"\n", i);
+        } else {
+            printf("[%zu]\t\"(tombstone)\" : \"(tombstone)\"\n", i);
+        }
+#else
+        if (entry.key) {
+            printf("- \"%s\": \"%s\"\n", entry.key, entry.value);
+        }
+#endif
+    }
 }

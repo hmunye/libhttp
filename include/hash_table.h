@@ -15,14 +15,13 @@ typedef struct {
     uint32_t size;
 } hash_table_t;
 
-/* Initialize given hash table with the specified capacity and optional
+/* Initialize a new hash table with the specified capacity and optional
  * custom hash function. Capacity must be a power-of-two. If `hash_fn` is NULL,
- * the default `FNV-1a` hashing function is used. Returns (1) on successful
- * initialization, otherwise (0). */
-int hash_table_init(hash_table_t *ht, uint32_t capacity, ht_hash_fn hash_fn);
+ * the default `FNV-1a` hashing function is used. Returns a pointer to the hash
+ * table, otherwise NULL. */
+hash_table_t *hash_table_init(uint32_t capacity, ht_hash_fn hash_fn);
 
-/* Free the memory allocated for hash table entries. Caller is responsible for
- * memory allocated for the initial hash table structure. */
+/* Free the memory allocated for hash table and it's entries. */
 void hash_table_free(hash_table_t *ht);
 
 /* Insert a key/value pair into given hash table. Duplicate keys are updated
@@ -36,5 +35,8 @@ char *hash_table_lookup(hash_table_t *ht, const char *key);
 /* Remove the key/value pair associated with the given key. Returns (1) on
  * successful deletion, otherwise (0). */
 int hash_table_delete(hash_table_t *ht, const char *key);
+
+/* Prints the contents of the hash table to stdout. */
+void hash_table_debug_print(const hash_table_t *ht);
 
 #endif  // HASH_TABLE_H

@@ -1,6 +1,7 @@
 #include "request.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -8,12 +9,12 @@
 typedef enum {
     PARSER_RL = 0, /* State for parsing the request line. */
     PARSER_H,      /* State for parsing the headers. */
+    PARSER_B,      /* State for parsing the body. */
 } parser_state_t;
 
 typedef struct {
-    char buf[REQUEST_LINE_SIZE]; /* Buffer for accumulating parts of the
-                                    request. */
-    size_t bytes_read;           /* Number of bytes read so far. */
+    char buf[BODY_SIZE]; /* Buffer for accumulating parts of the request. */
+    size_t bytes_read;   /* Number of bytes read so far. */
     parser_state_t parser_state; /* Current state of the parser. */
 } parser_t;
 
@@ -25,6 +26,31 @@ __thread parser_t parser = {0};
 static void parser_reset(void) {
     memset(&parser, 0, sizeof parser);
 }
+
+// Lookup tables for efficient token validation. Each "bit" represents whether
+// an ASCII character is valid or invalid according to RFC. Set "bits" mark the
+// valid characters, while cleared "bits" mark invalid characters.
+static uint8_t tchars_name_lookup_table[] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // ASCII 0-15
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // ASCII 16-31
+    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,  // ASCII 32-47
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,  // ASCII 48-63
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 64-79
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,  // ASCII 80-95
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 96-111
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,  // ASCII 112-127
+};
+
+static uint8_t tchars_value_lookup_table[] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // ASCII 0-15
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // ASCII 16-31
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 32-47
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 48-63
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 64-79
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 80-95
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // ASCII 96-111
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,  // ASCII 112-127
+};
 
 const char *method_to_str[] = {
     "GET",     /* GET */
@@ -47,18 +73,76 @@ static method_t str_to_method(const char *method_str) {
     return UNKNOWN_METHOD;
 }
 
+static int request_body_parse(request_t *req, size_t chunk_len) {
+    if (req->body_len == 0) {
+        char *content_length;
+        // Assuming that a body is only present when `Content-Length`
+        // header is present.
+        if ((content_length =
+                 hash_table_lookup(req->headers, "content-length")) == NULL) {
+            // Nothing left to parse.
+            return PARSE_OK;
+        }
+
+        // To distinguish success/failure after call.
+        errno = 0;
+        long body_len = strtol(content_length, NULL, 10);
+        if (body_len == ERANGE || body_len == EINVAL) {
+            perror("ERROR: request_parse (strtol)");
+            return PARSE_INVALID;
+        }
+
+        if (body_len < 0 || body_len > BODY_SIZE) {
+            return PARSE_INVALID;
+        }
+
+        req->body_len = (size_t)body_len;
+    }
+
+    // Content length of 0, but bytes are being read, so body is left empty.
+    if (req->body_len == 0 && chunk_len > 0) {
+        return PARSE_OK;
+    }
+
+    // There is more of the body to parse.
+    if (parser.bytes_read < req->body_len && chunk_len > 0) {
+        return PARSE_INCOMPLETE;
+    }
+
+    // Empty chunk indicates no more new data is coming in, so body
+    // should be ready at this point.
+    if (parser.bytes_read < req->body_len && chunk_len == 0) {
+        return PARSE_INVALID;
+    }
+
+    // Body will be truncated if longer than specified content length.
+    if (parser.bytes_read >= req->body_len) {
+        memcpy(req->body, parser.buf, req->body_len);
+        req->body[req->body_len] = '\0';
+    }
+
+    return PARSE_OK;
+}
+
 // Parse the given line, populating the headers of `req`.
 static int request_header_parse(request_t *req, char *line, size_t line_len) {
-    (void)req;
+    size_t local_line_len = line_len - 1;
+
     char *field_name_end = line;
-    while (line_len-- > 0 && *field_name_end != ':' && *field_name_end != ' ') {
+    while (line_len-- > 0 && *field_name_end != ':') {
+        // Ensure character is in ASCII range and valid
+        if ((unsigned char)*field_name_end > 127 ||
+            tchars_name_lookup_table[(unsigned char)*field_name_end] == 0) {
+            return PARSE_INVALID;
+        }
+
         field_name_end++;
     }
 
-    // Checks if first character is SP. Also no SP allowed between field-name
-    // and colon. `field_name_end` should be pointing to the colon on valid
-    // header.
-    if (line_len == 0 || *field_name_end != ':') {
+    // Checks if first character is SP or no field-name provided. Also no SP
+    // allowed between field-name and colon. `field_name_end` should be pointing
+    // to the colon on valid header.
+    if (line_len == 0 || *field_name_end != ':' || local_line_len == line_len) {
         return PARSE_INVALID;
     }
 
@@ -83,21 +167,31 @@ static int request_header_parse(request_t *req, char *line, size_t line_len) {
            (*field_value_end == ' ' || *field_value_end == '\r' ||
             *field_value_end == '\n'));
 
-    // Replace `\r` with `\0`.
+    // Null terminate to exclude CRLF.
     *(field_value_end + 1) = '\0';
 
-    // ALL characters between first character after leading whitespace character
-    // before trailing whitespace and CRLF, inclusive.
+    for (size_t i = 0; *(field_name_end + i) != '\0'; ++i) {
+        // Ensure field-value characters are in ASCII range and valid
+        if ((unsigned char)*(field_name_end + i) > 127 ||
+            tchars_value_lookup_table[(unsigned char)*(field_name_end + i)] ==
+                0) {
+            return PARSE_INVALID;
+        }
+    }
+
+    // ALL characters between first character after leading whitespace
+    // character before trailing whitespace and CRLF, inclusive.
     size_t field_value_len = (size_t)(field_value_end - field_name_end);
     if (field_value_len > HEADER_FIELD_VALUE_SIZE) {
         return PARSE_INVALID;
     }
 
-    // TODO: insert values into headers hash table
     line[field_name_len] = '\0';
-    printf("header name: %s\n", line);
 
-    printf("header value: %s\n", field_name_end);
+    // `line` contains field-name and `field_name_end` contains field-value.
+    if ((hash_table_insert(req->headers, line, field_name_end)) == 0) {
+        return PARSE_ERR;
+    }
 
     return PARSE_OK;
 }
@@ -157,9 +251,9 @@ static int request_line_parse(request_t *req, char *line, size_t line_len) {
         version_end++;
     }
 
-    // After locating the CR in a CRLF, the remaining line should only contain
-    // the LF. If there's more than one byte left, the request line has extra
-    // data and is invalid.
+    // After locating the CR in a CRLF, the remaining line should only
+    // contain the LF. If there's more than one byte left, the request line
+    // has extra data and is invalid.
     if (line_len != 1) {
         return PARSE_INVALID;
     }
@@ -184,14 +278,14 @@ int request_parse(request_t *req, char *chunk, size_t chunk_len) {
     assert(req && chunk);
 
     if (chunk_len == 0) {
-        // When the chunk is empty, parse and process the remaining contents of
-        // `parser.buf`. Empty `chunk` should represent end of stream.
+        // When the chunk is empty, parse and process the remaining contents
+        // of `parser.buf`. Empty `chunk` should represent end of stream.
         goto empty_chunk;
     }
 
     size_t total_bytes = chunk_len + parser.bytes_read;
 
-    if (total_bytes > REQUEST_LINE_SIZE) {
+    if (total_bytes > BODY_SIZE) {
         parser_reset();
         return PARSE_INVALID;
     }
@@ -202,13 +296,15 @@ int request_parse(request_t *req, char *chunk, size_t chunk_len) {
 
     char *end;
 empty_chunk:
-    if ((end = strstr(parser.buf, "\r\n")) == NULL) {
+    if (parser.parser_state != PARSER_B &&
+        (end = strstr(parser.buf, "\r\n")) == NULL) {
         if (chunk_len == 0) {
             parser_reset();
             return PARSE_INVALID;
         }
 
-        return PARSE_INCOMPLETE; /* Need more data to process a full line. */
+        return PARSE_INCOMPLETE; /* Need more data to process a full line.
+                                  */
     }
 
     // Treat this part of the buffer, including CRLF, as a complete line.
@@ -224,9 +320,9 @@ empty_chunk:
                 return status;
             }
 
-            // Shifting the unprocessed bytes in `parser.buf` to the front, so
-            // the buffer can continue to be filled and parsed incrementally
-            // without losing data.
+            // Shifting the unprocessed bytes in `parser.buf` to the front,
+            // so the buffer can continue to be filled and parsed
+            // incrementally without losing data.
             parser.bytes_read -= line_len;
             memmove(parser.buf, parser.buf + line_len, parser.bytes_read);
             parser.buf[parser.bytes_read] = '\0';
@@ -244,11 +340,15 @@ empty_chunk:
                 memmove(parser.buf, parser.buf + 2, parser.bytes_read - 1);
                 parser.bytes_read -= 2;
 
-                // TODO: Transition to next state
-                break;
+                // Transition to next state (body).
+                parser.parser_state = PARSER_B;
+                return PARSE_INCOMPLETE;
             }
 
-            // TODO: check if max headers limit is reached before parsing
+            // Check if headers limit is reached before parsing.
+            if (req->headers->size > HEADERS_MAX_LIMIT) {
+                return PARSE_INVALID;
+            }
 
             int status;
             if ((status = request_header_parse(req, line, line_len)) !=
@@ -263,6 +363,21 @@ empty_chunk:
 
             // Need more data to process all field-lines (headers).
             return PARSE_INCOMPLETE;
+        }
+        case PARSER_B: {
+            int status = request_body_parse(req, chunk_len);
+
+            switch (status) {
+                case PARSE_OK:
+                    break;
+                case PARSE_INCOMPLETE:
+                    return status;
+                default:
+                    parser_reset();
+                    return status;
+            }
+
+            break;
         }
         default: {
             fprintf(stderr, "ERROR: request_parse: invalid parser state.\n");

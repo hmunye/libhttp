@@ -7,7 +7,8 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -Wconversion --std=c99 -Wpedantic
 
 INCLUDES = $(foreach DIR,$(INCDIRS),-I$(DIR))
-DFLAGS = -D_DEBUG -g
+# DFLAGS = -D_DEBUG -g
+DFLAGS = -g
 LDFLAGS = -pthread
 
 CFLAGS += $(INCLUDES) $(LDFLAGS)
@@ -26,11 +27,11 @@ debug: CFLAGS += $(DFLAGS)
 debug: $(BIN)
 
 $(BIN): $(BIN_OBJFILES)
-	$(CC) -o $@ $^
+	@$(CC) -o $@ $^
 
 $(BIN_OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	@$(CC) $(CFLAGS) -c -o $@ $<
 
 memcheck: debug
 	@valgrind --tool=memcheck --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BIN)

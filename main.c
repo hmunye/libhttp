@@ -28,13 +28,22 @@ channel_t *chan;
 
 // TODO: replace polling since it is only on one socket at a time
 // consumer: reads client connections from channel and writes lines to stdout.
-static void *producer(void *arg) {
+static void *consumer(void *arg) {
     (void)arg;
 
     while (1) {
         int clientfd = DECODE_INT(channel_read(chan));
 
-        request_t req = {0};
+        request_t req = {
+            .request_line = {0},
+            .headers = hash_table_init(64, NULL),
+        };
+
+        if (!req.headers) {
+            close(clientfd);
+            pthread_exit(NULL);
+        }
+
         char buf[BUFFER_SIZE + 1];
 
         struct pollfd pfd[1];
@@ -77,6 +86,7 @@ static void *producer(void *arg) {
             perror("ERROR: poll");
 
             printf("server: client connection closed\n");
+            hash_table_free(req.headers);
             close(clientfd);
             continue;
         }
@@ -85,6 +95,7 @@ static void *producer(void *arg) {
             perror("ERROR: recv");
 
             printf("server: client connection closed\n");
+            hash_table_free(req.headers);
             close(clientfd);
             continue;
         }
@@ -96,14 +107,20 @@ static void *producer(void *arg) {
                        method_to_str[req.request_line.method]);
                 printf("- Target: %s\n", req.request_line.request_target);
                 printf("- Version: %s\n", req.request_line.version);
+                printf("Headers: \n");
+                hash_table_debug_print(req.headers);
+                printf("Body: \n");
+                printf("- %s\n", req.body);
 
                 printf("server: client connection closed\n");
+                hash_table_free(req.headers);
                 close(clientfd);
                 continue;
             case PARSE_ERR:
                 printf("server: server error occured\n");
 
                 printf("server: client connection closed\n");
+                hash_table_free(req.headers);
                 close(clientfd);
                 continue;
             case PARSE_INCOMPLETE:
@@ -111,6 +128,7 @@ static void *producer(void *arg) {
                 printf("server: error occured parsing HTTP request\n");
 
                 printf("server: client connection closed\n");
+                hash_table_free(req.headers);
                 close(clientfd);
                 continue;
         }
@@ -139,7 +157,7 @@ int main(void) {
     pthread_t cons_threads[THREAD_POOL];
 
     for (size_t i = 0; i < THREAD_POOL; ++i) {
-        if (pthread_create(&cons_threads[i], NULL, producer, NULL) != 0) {
+        if (pthread_create(&cons_threads[i], NULL, consumer, NULL) != 0) {
             perror("ERROR: pthread_create");
             channel_free(chan, NULL);
             listener->close();
