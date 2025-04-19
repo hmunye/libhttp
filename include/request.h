@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+#include "hash_table.h"
+
 #ifndef PARSE_OK
 #define PARSE_OK 0 /* Parsing completed successfully without issues. */
 #endif
@@ -19,24 +21,17 @@
 #define PARSE_INVALID -3 /* The parsed data is invalid or malformed. */
 #endif
 
-/* RFC 9112:
- * 3. Request Line
- *
- * It is RECOMMENDED that all HTTP senders and recipients support, at a minimum,
- * request-line lengths of 8000 octets.
- * */
 #define METHOD_SIZE 7 /* Enough for the largest HTTP method supported here. */
 #define REQUEST_TARGET_SIZE 1025
 #define VERSION_SIZE 9 /* Only supporting HTTP/1.1 version. */
 
+#define HEADER_FIELD_NAME_SIZE 128
+#define HEADER_FIELD_VALUE_SIZE 1024
+#define HEADERS_MAX_LIMIT 32
+
 /* Extra space for space characters (SP) and (CRLF). */
 #define REQUEST_LINE_SIZE (METHOD_SIZE + REQUEST_TARGET_SIZE + VERSION_SIZE + 4)
 
-/* RFC 9110:
- * 9. Methods
- *
- * All general-purpose servers MUST support the methods GET and HEAD. All other
- * methods are OPTIONAL. */
 typedef enum {
     GET,
     HEAD,
@@ -58,6 +53,7 @@ typedef struct {
 
 typedef struct {
     request_line_t request_line;
+    hash_table_t *headers;
 } request_t;
 
 /* Parses HTTP request chunks incrementally into the given `req`. Returns

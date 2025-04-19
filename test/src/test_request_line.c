@@ -1,6 +1,6 @@
 #include "test_request_line.h"
 
-#define MAX_BYTES_PER_READ 3
+#define MAX_BYTES_PER_READ 10
 
 void test_request_line_valid_get(void) {
     request_t req = {0};
@@ -30,7 +30,7 @@ void test_request_line_valid_get(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -82,7 +82,7 @@ void test_request_line_valid_get_with_path(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -136,7 +136,7 @@ void test_request_line_valid_post_with_path(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -188,7 +188,7 @@ void test_request_line_invalid_missing_parts(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -237,7 +237,7 @@ void test_request_line_invalid_out_of_order(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -285,7 +285,7 @@ void test_request_line_invalid_version(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -333,7 +333,7 @@ void test_request_line_invalid_method(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -381,7 +381,7 @@ void test_request_line_invalid_long_method(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -447,7 +447,7 @@ void test_request_line_invalid_long_request_target(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -497,7 +497,7 @@ void test_request_line_invalid_extra_whitespace(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -547,7 +547,7 @@ void test_request_line_invalid_tab_replace_sp(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -597,7 +597,7 @@ void test_request_line_invalid_malformed_version(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -647,7 +647,7 @@ void test_request_line_invalid_missing_crlf(void) {
 
         bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
         if (bytes_read == 0) {
-            while ((status = request_parse(&req, "", 0)) != PARSE_INCOMPLETE);
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
             break;
         }
 
@@ -957,7 +957,6 @@ void test_request_line_invalid_version_injection(void) {
     printf("[PASS] %s\n", __func__);
 }
 
-// TODO: Ensure this test is invalid after implementing rest of parser
 void test_request_line_invalid_multiple_request_lines(void) {
     request_t req = {0};
 
@@ -1002,7 +1001,9 @@ void test_request_line_invalid_multiple_request_lines(void) {
         }
     }
 
-    assert(status == PARSE_OK);
+    assert(status == PARSE_INVALID);
+
+    // Parsed from the first request-line
     assert(req.request_line.method == GET);
     assert(strcmp(req.request_line.request_target, "/") == 0);
     assert(strcmp(req.request_line.version, "HTTP/1.1") == 0);
@@ -1157,6 +1158,55 @@ void test_request_line_invalid_lfcr(void) {
     printf("[PASS] %s\n", __func__);
 }
 
+void test_request_line_invalid_missing_request_target(void) {
+    request_t req = {0};
+
+    chunk_reader_t reader = {
+        .data =
+            "GET / HTTP/1.1\n\r"
+            "Host: localhost\r\n"
+            "User-Agent: curl\r\n"
+            "Accept: */*\r\n"
+            "\r\n",
+        .bytes_per_read = 1,
+        .pos = 0,
+    };
+
+    char buf[strlen(reader.data) + 1];
+
+    int status;
+    size_t bytes_read;
+#ifdef _DEBUG
+    size_t iteration = 0;
+#endif
+    while (1) {
+        // Compute a random number between 1 and MAX_BYTES_PER_READ, inclusive,
+        // for each read.
+        reader.bytes_per_read = (size_t)((rand() % MAX_BYTES_PER_READ) + 1);
+
+        bytes_read = chunk_reader_read(&reader, buf, sizeof buf);
+        if (bytes_read == 0) {
+            while ((status = request_parse(&req, "", 0)) == PARSE_INCOMPLETE);
+            break;
+        }
+
+#ifdef _DEBUG
+        printf("[%02zu] bytes-read (%02zu): ", iteration++, bytes_read);
+        print_escaped_buf(buf, bytes_read);
+        printf("\n");
+#endif
+
+        if ((status = request_parse(&req, buf, bytes_read)) !=
+            PARSE_INCOMPLETE) {
+            break;
+        }
+    }
+
+    assert(status == PARSE_INVALID);
+
+    printf("[PASS] %s\n", __func__);
+}
+
 void test_request_line_all(void) {
     srand((unsigned)time(NULL));
 
@@ -1183,4 +1233,5 @@ void test_request_line_all(void) {
     test_request_line_invalid_data_after_version();
     test_request_line_invalid_cr_abuse();
     test_request_line_invalid_lfcr();
+    test_request_line_invalid_missing_request_target();
 }

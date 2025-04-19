@@ -7,6 +7,7 @@
 // State machine approach for incremental parsing of the request.
 typedef enum {
     PARSER_RL = 0, /* State for parsing the request line. */
+    PARSER_H,      /* State for parsing the headers. */
 } parser_state_t;
 
 typedef struct {
@@ -46,6 +47,61 @@ static method_t str_to_method(const char *method_str) {
     return UNKNOWN_METHOD;
 }
 
+// Parse the given line, populating the headers of `req`.
+static int request_header_parse(request_t *req, char *line, size_t line_len) {
+    (void)req;
+    char *field_name_end = line;
+    while (line_len-- > 0 && *field_name_end != ':' && *field_name_end != ' ') {
+        field_name_end++;
+    }
+
+    // Checks if first character is SP. Also no SP allowed between field-name
+    // and colon. `field_name_end` should be pointing to the colon on valid
+    // header.
+    if (line_len == 0 || *field_name_end != ':') {
+        return PARSE_INVALID;
+    }
+
+    // ALL characters between first to before the colon, inclusive.
+    size_t field_name_len = (size_t)(field_name_end - line);
+    if (field_name_len > HEADER_FIELD_NAME_SIZE) {
+        return PARSE_INVALID;
+    }
+
+    // Skip any leading whitespace of the field-value.
+    while (line_len-- > 0 && *(++field_name_end) == ' ');
+
+    if (line_len == 0) {
+        return PARSE_INVALID;
+    }
+
+    // +1 to also capture the LF.
+    char *field_value_end = field_name_end + line_len + 1;
+
+    // Trim any trailing whitespace of the field-value.
+    while ((field_value_end--) > field_name_end &&
+           (*field_value_end == ' ' || *field_value_end == '\r' ||
+            *field_value_end == '\n'));
+
+    // Replace `\r` with `\0`.
+    *(field_value_end + 1) = '\0';
+
+    // ALL characters between first character after leading whitespace character
+    // before trailing whitespace and CRLF, inclusive.
+    size_t field_value_len = (size_t)(field_value_end - field_name_end);
+    if (field_value_len > HEADER_FIELD_VALUE_SIZE) {
+        return PARSE_INVALID;
+    }
+
+    // TODO: insert values into headers hash table
+    line[field_name_len] = '\0';
+    printf("header name: %s\n", line);
+
+    printf("header value: %s\n", field_name_end);
+
+    return PARSE_OK;
+}
+
 // Parse the given line, populating the request-line of `req`.
 static int request_line_parse(request_t *req, char *line, size_t line_len) {
     char *method_end = line;
@@ -57,13 +113,8 @@ static int request_line_parse(request_t *req, char *line, size_t line_len) {
         return PARSE_INVALID;
     }
 
-    // RFC 9112:
-    // 3. Request Line
-    //
-    // A server that receives a method longer than any that it implements SHOULD
-    // respond with a 501 (Not Implemented) status code.
     size_t method_len = (size_t)(method_end - line);
-    if (method_len >= METHOD_SIZE) {
+    if (method_len > METHOD_SIZE) {
         return PARSE_INVALID;
     }
 
@@ -85,11 +136,6 @@ static int request_line_parse(request_t *req, char *line, size_t line_len) {
         return PARSE_INVALID;
     }
 
-    // RFC 9112:
-    // 3. Request Line
-    //
-    // A server that receives a request-target longer than any URI it wishes to
-    // parse MUST respond with a 414 (URI Too Long) status code.
     size_t request_target_len =
         (size_t)(request_target_end - request_target_start);
     if (request_target_len >= sizeof req->request_line.request_target) {
@@ -180,13 +226,43 @@ empty_chunk:
 
             // Shifting the unprocessed bytes in `parser.buf` to the front, so
             // the buffer can continue to be filled and parsed incrementally
-            // without losing data
+            // without losing data.
             parser.bytes_read -= line_len;
             memmove(parser.buf, parser.buf + line_len, parser.bytes_read);
             parser.buf[parser.bytes_read] = '\0';
 
-            // TODO: transition to PARSER_H state and return PARSE_INCOMPLETE
-            break;
+            // Transition to next state (headers).
+            parser.parser_state = PARSER_H;
+            return PARSE_INCOMPLETE;
+        }
+        case PARSER_H: {
+            // Check for empty line (single CRLF) that indicates end of HTTP
+            // headers section.
+            if (parser.bytes_read > 1 &&
+                (parser.buf[0] == '\r' && parser.buf[1] == '\n')) {
+                // Move leading CRLF out of buffer
+                memmove(parser.buf, parser.buf + 2, parser.bytes_read - 1);
+                parser.bytes_read -= 2;
+
+                // TODO: Transition to next state
+                break;
+            }
+
+            // TODO: check if max headers limit is reached before parsing
+
+            int status;
+            if ((status = request_header_parse(req, line, line_len)) !=
+                PARSE_OK) {
+                parser_reset();
+                return status;
+            }
+
+            parser.bytes_read -= line_len;
+            memmove(parser.buf, parser.buf + line_len, parser.bytes_read);
+            parser.buf[parser.bytes_read] = '\0';
+
+            // Need more data to process all field-lines (headers).
+            return PARSE_INCOMPLETE;
         }
         default: {
             fprintf(stderr, "ERROR: request_parse: invalid parser state.\n");
