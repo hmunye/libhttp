@@ -11,8 +11,7 @@ static int tcp_sock_fd = -1;
 
 // Initialize a TCP socket, bind it to the specified host and port, and listen
 // with the given backlog. Use NULL for host to bind to INADDR_ANY.
-static void listen_tcp(const char *restrict host, const char *restrict port,
-                       int backlog) {
+static void listen_tcp(const char *host, const char *port, int backlog) {
     assert(port && backlog > 0);
 
     int status, reuse = 1;

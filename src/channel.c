@@ -17,7 +17,6 @@ struct channel_t {
 };
 
 channel_t *channel_init(uint32_t capacity) {
-    // Assert capacity is a power-of-two.
     assert((capacity & (capacity - 1)) == 0);
 
     channel_t *chan = malloc(sizeof(*chan));
@@ -57,7 +56,7 @@ channel_t *channel_init(uint32_t capacity) {
     return chan;
 }
 
-void channel_free(channel_t *chan, channel_cleanup_fn cleanup_fn) {
+void channel_free(channel_t *chan, chan_cleanup_fn cleanup_fn) {
     assert(chan);
 
     pthread_mutex_lock(&chan->lock);

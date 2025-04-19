@@ -170,10 +170,12 @@ empty_chunk:
     char *line = parser.buf;
 
     switch (parser.parser_state) {
-        case PARSER_RL:
-            if (request_line_parse(req, line, line_len) == PARSE_INVALID) {
+        case PARSER_RL: {
+            int status;
+            if ((status = request_line_parse(req, line, line_len)) !=
+                PARSE_OK) {
                 parser_reset();
-                return PARSE_INVALID;
+                return status;
             }
 
             // Shifting the unprocessed bytes in `parser.buf` to the front, so
@@ -185,10 +187,12 @@ empty_chunk:
 
             // TODO: transition to PARSER_H state and return PARSE_INCOMPLETE
             break;
-        default:
+        }
+        default: {
             fprintf(stderr, "ERROR: request_parse: invalid parser state.\n");
             parser_reset();
             return PARSE_ERR;
+        }
     }
 
     parser_reset();
