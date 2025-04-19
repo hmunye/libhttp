@@ -84,13 +84,22 @@ static int request_body_parse(request_t *req, size_t chunk_len) {
             return PARSE_OK;
         }
 
-        // To distinguish success/failure after call.
-        errno = 0;
-        long body_len = strtol(content_length, NULL, 10);
-        if (body_len == ERANGE || body_len == EINVAL) {
-            perror("ERROR: request_parse (strtol)");
+        // Save and restore errno.
+        int saved_errno = errno;
+
+        char *endptr = NULL;
+        long body_len = strtol(content_length, &endptr, 10);
+        // Underflow/overflow occurred, no digits found, or additional
+        // characters are remaining.
+        if (errno == ERANGE || content_length == endptr ||
+            (errno == 0 && *endptr != 0)) {
+            if (errno != 0) {
+                perror("ERROR: request_parse (strtol)");
+            }
             return PARSE_INVALID;
         }
+
+        errno = saved_errno;
 
         if (body_len < 0 || body_len > BODY_SIZE) {
             return PARSE_INVALID;

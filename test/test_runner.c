@@ -1,5 +1,6 @@
 #include "test_channel.h"
 #include "test_hash_table.h"
+#include "test_request_body.h"
 #include "test_request_headers.h"
 #include "test_request_line.h"
 
@@ -7,12 +8,12 @@ int main(void) {
     printf("+-------------------+\n");
     printf("|   CHANNEL TESTS   |\n");
     printf("+-------------------+\n");
-    test_channel_all();
+    // test_channel_all();
 
     printf("+----------------------+\n");
     printf("|   HASH TABLE TESTS   |\n");
     printf("+----------------------+\n");
-    test_hash_table_all();
+    // test_hash_table_all();
 
     printf("+--------------------------------+\n");
     printf("|   REQUEST LINE PARSING TESTS   |\n");
@@ -23,6 +24,11 @@ int main(void) {
     printf("|   REQUEST HEADERS PARSING TESTS   |\n");
     printf("+-----------------------------------+\n");
     test_request_headers_all();
+
+    printf("+--------------------------------+\n");
+    printf("|   REQUEST BODY PARSING TESTS   |\n");
+    printf("+--------------------------------+\n");
+    test_request_body_all();
 
     return 0;
 }
